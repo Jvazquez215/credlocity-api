@@ -8549,8 +8549,11 @@ app.include_router(support_chat_router, tags=["Customer Support Chat"])
 # Seed default data on startup
 @app.on_event("startup")
 async def startup_seed():
-    await seed_case_update_status_options()
-    await seed_credit_repair_companies()
+    try:
+        await seed_case_update_status_options()
+        await seed_credit_repair_companies()
+    except Exception as e:
+        print(f"Warning: Startup seed failed (non-fatal): {e}")
 
 
 if __name__ == "__main__":
