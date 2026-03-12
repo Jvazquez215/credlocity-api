@@ -14,12 +14,27 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from emergentintegrations.payments.stripe.checkout import (
-    StripeCheckout, 
-    CheckoutSessionResponse, 
-    CheckoutStatusResponse, 
-    CheckoutSessionRequest
-)
+# Stripe integration (native)
+import stripe
+
+class StripeCheckout:
+    def __init__(self, api_key):
+        stripe.api_key = api_key
+    
+    async def create_session(self, **kwargs):
+        return stripe.checkout.Session.create(**kwargs)
+    
+    async def get_session(self, session_id):
+        return stripe.checkout.Session.retrieve(session_id)
+
+class CheckoutSessionRequest:
+    pass
+
+class CheckoutSessionResponse:
+    pass
+
+class CheckoutStatusResponse:
+    pass
 
 # Database connection
 MONGO_URL = os.environ.get("MONGO_URL")
