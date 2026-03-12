@@ -12,15 +12,25 @@ from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 import shutil
 import uuid
-from PIL import Image
+try:
+    from PIL import Image
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
+    print("Warning: PIL not available, image processing disabled")
 import io
 import base64
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
-from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
+try:
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import inch
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
+    HAS_REPORTLAB = True
+except ImportError:
+    HAS_REPORTLAB = False
+    print("Warning: reportlab not available, PDF generation disabled")
 from creditsage_bot import CreditSageBot
 
 
