@@ -8,7 +8,7 @@ services:
     startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: MONGO_URL
-        value: mongodb+srv://credlocity:Credlocity2024!@credlocity.mzhwmp7.mongodb.net/?retryWrites=true&w=majority&appName=Credlocity&tls=true&tlsAllowInvalidCertificates=true
+        value: mongodb+srv://credlocity:Credlocity2024!@credlocity.mzhwmp7.mongodb.net/?retryWrites=true&w=majority&appName=Credlocity
       - key: DB_NAME
         value: credlocity
       - key: SECRET_KEY

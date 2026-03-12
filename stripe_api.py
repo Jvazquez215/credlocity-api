@@ -9,6 +9,7 @@ from typing import Optional, Dict, Any, List
 from fastapi import APIRouter, HTTPException, Request, Header
 from pydantic import BaseModel, Field
 from motor.motor_asyncio import AsyncIOMotorClient
+from db_client import get_client
 from uuid import uuid4
 from dotenv import load_dotenv
 
@@ -41,7 +42,7 @@ MONGO_URL = os.environ.get("MONGO_URL")
 DB_NAME = os.environ.get("DB_NAME", "credlocity")
 STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY")
 
-client = AsyncIOMotorClient(MONGO_URL)
+client = get_client(MONGO_URL)
 db = client[DB_NAME]
 
 stripe_router = APIRouter(prefix="/api/stripe", tags=["Stripe Payments"])

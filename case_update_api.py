@@ -10,12 +10,13 @@ from uuid import uuid4
 from typing import Optional, List
 from pydantic import BaseModel
 from motor.motor_asyncio import AsyncIOMotorClient
+from db_client import get_client
 import os
 from auth import decode_token
 
 # Get database connection
 mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
-client = AsyncIOMotorClient(mongo_url)
+client = get_client(mongo_url)
 db = client[os.environ.get('DB_NAME', 'credlocity')]
 
 case_update_router = APIRouter()

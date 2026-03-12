@@ -5,6 +5,7 @@ Tracks user sessions, activity events, and generates performance metrics
 
 from fastapi import APIRouter, HTTPException, Request
 from motor.motor_asyncio import AsyncIOMotorClient
+from db_client import get_client
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 # Database connection
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "test_database")
-client = AsyncIOMotorClient(MONGO_URL)
+client = get_client(MONGO_URL)
 db = client[DB_NAME]
 
 router = APIRouter(prefix="/api/activity", tags=["Activity Tracking"])

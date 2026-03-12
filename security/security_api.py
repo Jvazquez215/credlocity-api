@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 import os
 
 from motor.motor_asyncio import AsyncIOMotorClient
+from db_client import get_client
 
 from .roles import UserRole, is_credlocity_staff
 from .audit_logger import AuditLogger
@@ -23,7 +24,7 @@ from .authorization import get_user_context, execute_as_admin
 # Database connection
 MONGO_URL = os.environ.get("MONGO_URL")
 DB_NAME = os.environ.get("DB_NAME", "credlocity")
-client = AsyncIOMotorClient(MONGO_URL)
+client = get_client(MONGO_URL)
 db = client[DB_NAME]
 
 security_router = APIRouter(prefix="/api/security", tags=["Security"])

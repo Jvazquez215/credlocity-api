@@ -17,10 +17,11 @@ import base64
 
 # Import database from server
 from motor.motor_asyncio import AsyncIOMotorClient
+from db_client import get_client
 
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "test_database")
-client = AsyncIOMotorClient(MONGO_URL)
+client = get_client(MONGO_URL)
 db = client[DB_NAME]
 
 client_review_router = APIRouter(prefix="/api/client-reviews", tags=["Client Reviews"])

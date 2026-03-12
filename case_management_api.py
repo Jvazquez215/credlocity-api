@@ -16,11 +16,12 @@ from uuid import uuid4
 import os
 import json
 from motor.motor_asyncio import AsyncIOMotorClient
+from db_client import get_client
 
 # Database connection
 MONGO_URL = os.environ.get("MONGO_URL")
 DB_NAME = os.environ.get("DB_NAME", "credlocity")
-client = AsyncIOMotorClient(MONGO_URL)
+client = get_client(MONGO_URL)
 db = client[DB_NAME]
 
 case_management_router = APIRouter(prefix="/api/cases", tags=["Case Management"])

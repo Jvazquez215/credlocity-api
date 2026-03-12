@@ -9,13 +9,14 @@ from uuid import uuid4
 import os
 import bcrypt
 from motor.motor_asyncio import AsyncIOMotorClient
+from db_client import get_client
 
 attorney_router = APIRouter(prefix="/api/attorneys", tags=["Attorney Network"])
 
 # Database connection
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "app_db")
-client = AsyncIOMotorClient(MONGO_URL)
+client = get_client(MONGO_URL)
 db = client[DB_NAME]
 
 # Attorney status options
