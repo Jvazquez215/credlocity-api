@@ -8,9 +8,9 @@ services:
     startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: MONGO_URL
-        value: mongodb+srv://claw-setup-4bx5n:d6pevp4lqs2c73eepqh0@customer-apps.vur8w0.mongodb.net/?retryWrites=true&w=majority
+        value: mongodb+srv://credlocity:Credlocity2024!@credlocity.mzhwmp7.mongodb.net/?retryWrites=true&w=majority&appName=Credlocity
       - key: DB_NAME
-        value: claw-setup-4bx5n-test_database
+        value: credlocity
       - key: SECRET_KEY
         value: credlocity-prod-secret-2024-xk9m2
       - key: JWT_SECRET_KEY
