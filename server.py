@@ -82,11 +82,8 @@ load_dotenv(ROOT_DIR / '.env')
 
 # MongoDB connection
 mongo_url = os.environ['MONGO_URL']
-try:
-    import certifi
-    client = AsyncIOMotorClient(mongo_url, tlsCAFile=certifi.where())
-except ImportError:
-    client = AsyncIOMotorClient(mongo_url)
+from db_client import get_client
+client = get_client(mongo_url)
 db = client[os.environ['DB_NAME']]
 
 # Create the main app
