@@ -590,7 +590,7 @@ async def upload_review_video(
     filename = f"review_video_{review_id}_{int(datetime.now().timestamp())}.{ext}"
     
     # Save to uploads directory
-    upload_dir = "/app/uploads/review_videos"
+    upload_dir = "./uploads/review_videos"
     os.makedirs(upload_dir, exist_ok=True)
     file_path = os.path.join(upload_dir, filename)
     

@@ -598,7 +598,7 @@ async def upload_document(
     company_id = case.get("created_by_company_id", "default")
     
     # Create upload directory
-    upload_dir = f"/app/backend/uploads/cases/{company_id}/{case_id}/{document_type}"
+    upload_dir = ff"./uploads/cases/{company_id}/{case_id}/{document_type}"
     os.makedirs(upload_dir, exist_ok=True)
     
     # Generate unique filename

@@ -560,7 +560,7 @@ async def add_reaction(
 
 # ==================== FILE UPLOAD ====================
 
-UPLOAD_DIR = Path("/app/backend/uploads/chat")
+UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "./uploads/chat"))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 @chat_router.post("/upload")
