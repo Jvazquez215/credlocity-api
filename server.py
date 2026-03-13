@@ -8937,6 +8937,15 @@ async def startup_seed():
     except Exception as e:
         print(f"Warning: Startup seed failed (non-fatal): {e}")
 
+    # Auto-seed content data (FAQs, reviews, etc.) if collections are empty
+    try:
+        from seed_content import seed_content
+        print("=== Auto-seeding content data ===")
+        await seed_content(db)
+        print("=== Content seed complete ===")
+    except Exception as e:
+        print(f"Warning: Content seed failed (non-fatal): {e}")
+
 
 if __name__ == "__main__":
     import uvicorn
