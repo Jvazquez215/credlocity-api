@@ -99,6 +99,23 @@ MEDIA_DIR.mkdir(exist_ok=True)
 # Mount static files for media access
 app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
 
+@app.get('/api/health')
+async def health_check():
+    import ssl
+    result = {
+        'status': 'ok',
+        'python': __import__('sys').version,
+        'openssl': ssl.OPENSSL_VERSION,
+    }
+    try:
+        # Test DB connection
+        await db.command('ping')
+        result['database'] = 'connected'
+    except Exception as e:
+        result['database'] = f'error: {str(e)[:200]}'
+    return result
+
+
 
 # ============ AUTH HELPER ============
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
