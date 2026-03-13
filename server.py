@@ -98,6 +98,16 @@ MEDIA_DIR.mkdir(exist_ok=True)
 
 # Mount static files for media access
 app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
+@app.get('/api/server-ip')
+async def server_ip():
+    import httpx
+    try:
+        async with httpx.AsyncClient() as hc:
+            resp = await hc.get('https://api.ipify.org?format=json', timeout=10)
+            return resp.json()
+    except Exception as e:
+        return {'error': str(e)}
+
 
 @app.get('/api/health')
 async def health_check():
