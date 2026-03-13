@@ -3,6 +3,7 @@ Comprehensive FAQ seed script with realistic credit repair content
 """
 import asyncio
 from motor.motor_asyncio import AsyncIOMotorClient
+from db_client import get_client
 from datetime import datetime, timezone
 import os
 from dotenv import load_dotenv
@@ -16,7 +17,7 @@ DB_NAME = 'test_database'
 async def seed_comprehensive_faqs():
     """Seed comprehensive FAQ content"""
     
-    client = AsyncIOMotorClient(MONGO_URL)
+    client = get_client(MONGO_URL)
     db = client[DB_NAME]
     
     print("🌱 Starting comprehensive FAQ seed...")

@@ -5,6 +5,7 @@ Creates sample content for testing the blog management system
 
 import asyncio
 from motor.motor_asyncio import AsyncIOMotorClient
+from db_client import get_client
 from datetime import datetime, timezone
 import os
 from dotenv import load_dotenv
@@ -15,7 +16,7 @@ load_dotenv()
 # MongoDB connection
 MONGO_URL = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
 DB_NAME = os.environ.get('DB_NAME', 'credlocity_cms')
-client = AsyncIOMotorClient(MONGO_URL)
+client = get_client(MONGO_URL)
 db = client[DB_NAME]
 
 

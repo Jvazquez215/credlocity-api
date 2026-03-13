@@ -5,6 +5,7 @@ Run with: python seed_authors.py
 
 import asyncio
 from motor.motor_asyncio import AsyncIOMotorClient
+from db_client import get_client
 from datetime import datetime, timezone
 import uuid
 import os
@@ -18,7 +19,7 @@ async def seed_authors():
     
     # Connect to MongoDB
     mongo_url = os.environ.get('MONGO_URL')
-    client = AsyncIOMotorClient(mongo_url)
+    client = get_client(mongo_url)
     db_name = os.environ.get('DB_NAME', 'test_database')
     db = client[db_name]
     

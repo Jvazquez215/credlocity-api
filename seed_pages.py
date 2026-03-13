@@ -4,6 +4,7 @@ This ensures all pages are listed and editable in the page builder
 """
 import asyncio
 from motor.motor_asyncio import AsyncIOMotorClient
+from db_client import get_client
 import os
 from datetime import datetime, timezone
 import uuid
@@ -14,7 +15,7 @@ load_dotenv()
 
 # MongoDB connection
 mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
+client = get_client(mongo_url)
 db = client[os.environ['DB_NAME']]
 
 # Define all pages that should exist in the CMS

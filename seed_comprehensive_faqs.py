@@ -4,6 +4,7 @@ Phase 3C - Based on web research and credit industry best practices
 """
 import asyncio
 from motor.motor_asyncio import AsyncIOMotorClient
+from db_client import get_client
 from datetime import datetime, timezone
 import os
 from dotenv import load_dotenv
@@ -12,7 +13,7 @@ import uuid
 load_dotenv()
 
 async def seed_comprehensive_faqs():
-    client = AsyncIOMotorClient(os.getenv('MONGO_URL'))
+    client = get_client(os.getenv('MONGO_URL'))
     db = client.test_database
     
     print("🌱 Seeding comprehensive FAQ content...")

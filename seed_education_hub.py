@@ -7,6 +7,7 @@ Seed script for Education Hub - Creates:
 
 import asyncio
 from motor.motor_asyncio import AsyncIOMotorClient
+from db_client import get_client
 from datetime import datetime, timezone
 import uuid
 import os
@@ -17,7 +18,7 @@ load_dotenv()
 async def seed_education_hub():
     """Seed Education Hub with comprehensive content and sample letters"""
     
-    client = AsyncIOMotorClient(os.getenv('MONGO_URL'))
+    client = get_client(os.getenv('MONGO_URL'))
     db = client.test_database
     
     print("🌱 Starting Education Hub seed process...")

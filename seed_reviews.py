@@ -1,5 +1,6 @@
 import asyncio
 from motor.motor_asyncio import AsyncIOMotorClient
+from db_client import get_client
 from datetime import datetime, timezone
 import os
 from dotenv import load_dotenv
@@ -9,7 +10,7 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
+client = get_client(mongo_url)
 db = client[os.environ['DB_NAME']]
 
 sample_reviews = [

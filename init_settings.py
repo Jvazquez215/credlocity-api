@@ -4,6 +4,7 @@ Phase 4 - Site Settings System
 """
 import asyncio
 from motor.motor_asyncio import AsyncIOMotorClient
+from db_client import get_client
 from datetime import datetime, timezone
 import os
 from dotenv import load_dotenv
@@ -16,7 +17,7 @@ DB_NAME = 'test_database'
 async def init_site_settings():
     """Initialize default site settings if not exists"""
     
-    client = AsyncIOMotorClient(MONGO_URL)
+    client = get_client(MONGO_URL)
     db = client[DB_NAME]
     
     print("🔧 Initializing site settings...")
