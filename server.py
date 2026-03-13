@@ -12,25 +12,15 @@ from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 import shutil
 import uuid
-try:
-    from PIL import Image
-    HAS_PIL = True
-except ImportError:
-    HAS_PIL = False
-    print("Warning: PIL not available, image processing disabled")
+from PIL import Image
 import io
 import base64
-try:
-    from reportlab.lib.pagesizes import letter
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.units import inch
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
-    from reportlab.lib import colors
-    from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
-    HAS_REPORTLAB = True
-except ImportError:
-    HAS_REPORTLAB = False
-    print("Warning: reportlab not available, PDF generation disabled")
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
 from creditsage_bot import CreditSageBot
 
 
@@ -98,33 +88,27 @@ MEDIA_DIR.mkdir(exist_ok=True)
 
 # Mount static files for media access
 app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
-@app.get('/api/server-ip')
+
+@app.get("/api/health")
+async def health_check():
+    import ssl
+    result = {"status": "ok", "python": __import__("sys").version, "openssl": ssl.OPENSSL_VERSION}
+    try:
+        await db.command("ping")
+        result["database"] = "connected"
+    except Exception as e:
+        result["database"] = f"error: {str(e)[:200]}"
+    return result
+
+@app.get("/api/server-ip")
 async def server_ip():
     import httpx
     try:
         async with httpx.AsyncClient() as hc:
-            resp = await hc.get('https://api.ipify.org?format=json', timeout=10)
+            resp = await hc.get("https://api.ipify.org?format=json", timeout=10)
             return resp.json()
     except Exception as e:
-        return {'error': str(e)}
-
-
-@app.get('/api/health')
-async def health_check():
-    import ssl
-    result = {
-        'status': 'ok',
-        'python': __import__('sys').version,
-        'openssl': ssl.OPENSSL_VERSION,
-    }
-    try:
-        # Test DB connection
-        await db.command('ping')
-        result['database'] = 'connected'
-    except Exception as e:
-        result['database'] = f'error: {str(e)[:200]}'
-    return result
-
+        return {"error": str(e)}
 
 
 # ============ AUTH HELPER ============
@@ -8573,6 +8557,356 @@ from support_chat_api import support_chat_router, set_db as set_support_chat_db
 set_support_chat_db(db)
 app.include_router(support_chat_router, tags=["Customer Support Chat"])
 
+# Include the Training & Policies router
+from training_api import training_router, set_db as set_training_db
+set_training_db(db)
+app.include_router(training_router, tags=["Training & Policies"])
+
+# Include the Collections Settings router
+from collections_settings_api import collections_settings_router, set_db as set_collections_settings_db
+set_collections_settings_db(db)
+app.include_router(collections_settings_router, tags=["Collections Settings"])
+
+# Include the RBAC router
+from rbac_api import rbac_router, set_db as set_rbac_db, seed_default_groups
+set_rbac_db(db)
+app.include_router(rbac_router, tags=["RBAC"])
+
+# Include the Payroll router
+from payroll_api import payroll_router, set_db as set_payroll_db
+set_payroll_db(db)
+app.include_router(payroll_router, tags=["Payroll"])
+
+# Include the Documentation router
+from documentation_api import documentation_router, set_db as set_documentation_db, seed_documentation, seed_cms_mastery_training
+set_documentation_db(db)
+app.include_router(documentation_router, tags=["Documentation"])
+
+# Include E-Signature router
+from esign_api import esign_router, set_db as set_esign_db
+set_esign_db(db)
+app.include_router(esign_router, tags=["E-Signature"])
+
+
+# ==================== SEED PARTNER USERS ====================
+async def seed_partner_users():
+    """Seed the master admin and partner users."""
+    from auth import get_password_hash
+    
+    # Ensure Admin@credlocity.com exists as master admin
+    admin = await db.users.find_one({"email": "Admin@credlocity.com"})
+    if admin:
+        await db.users.update_one({"email": "Admin@credlocity.com"}, {"$set": {"is_master": True, "is_partner": True}})
+    
+    # Seed Shar@credlocity.com as partner
+    shar = await db.users.find_one({"email": "Shar@credlocity.com"})
+    if not shar:
+        shar_user = {
+            "id": str(uuid.uuid4()),
+            "email": "Shar@credlocity.com",
+            "password_hash": get_password_hash("Credit123!"),
+            "full_name": "Shar",
+            "role": "admin",
+            "is_master": False,
+            "is_partner": True,
+            "department": "Executive",
+            "status": "active",
+            "created_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(timezone.utc)
+        }
+        await db.users.insert_one(shar_user)
+    else:
+        await db.users.update_one({"email": "Shar@credlocity.com"}, {"$set": {"is_partner": True}})
+
+
+# ==================== OUTSOURCING SERVICE AGREEMENT ====================
+@app.post("/api/admin/outsource/partners/{partner_id}/agreement", dependencies=[Depends(check_permissions("author"))])
+async def generate_outsource_agreement(partner_id: str, pricing_data: dict, current_user: dict = Depends(get_current_user)):
+    """Generate a service agreement PDF for an outsourcing partner with custom pricing."""
+    try:
+        partner = await db.outsource_partners.find_one({"id": partner_id}, {"_id": 0})
+        if not partner:
+            raise HTTPException(status_code=404, detail="Partner not found")
+        
+        rate_per_account = pricing_data.get("rate_per_account", 30.00)
+        min_accounts = pricing_data.get("min_accounts", 35)
+        max_accounts = pricing_data.get("max_accounts", 50)
+        package_name = pricing_data.get("package_name", "Bureau Letters Only - Variable Volume")
+        additional_terms = pricing_data.get("additional_terms", "")
+        provider_name = pricing_data.get("provider_name", "Credlocity LLC")
+        provider_address = pricing_data.get("provider_address", "")
+        
+        agreement_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc)
+        
+        # Store agreement record
+        agreement = {
+            "id": agreement_id,
+            "partner_id": partner_id,
+            "company_name": partner.get("company_name", ""),
+            "contact_name": f"{partner.get('contact_first_name', '')} {partner.get('contact_last_name', '')}",
+            "contact_email": partner.get("contact_email", ""),
+            "rate_per_account": rate_per_account,
+            "min_accounts": min_accounts,
+            "max_accounts": max_accounts,
+            "package_name": package_name,
+            "additional_terms": additional_terms,
+            "provider_name": provider_name,
+            "provider_address": provider_address,
+            "status": "draft",
+            "generated_by": current_user["id"],
+            "generated_by_name": current_user.get("full_name", ""),
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat()
+        }
+
+        # Generate and persist the PDF
+        pdf_buffer = _generate_agreement_pdf(agreement)
+        pdf_bytes = pdf_buffer.getvalue()
+        pdf_filename = f"agreement_{agreement_id[:8]}.pdf"
+        pdf_dir = Path("media/agreements")
+        pdf_dir.mkdir(parents=True, exist_ok=True)
+        pdf_path = pdf_dir / pdf_filename
+        with open(pdf_path, "wb") as f:
+            f.write(pdf_bytes)
+        agreement["pdf_url"] = f"/media/agreements/{pdf_filename}"
+
+        await db.outsource_agreements.insert_one(agreement)
+        agreement.pop("_id", None)
+
+        # Also store in the partner's documents so it appears in their file
+        partner_doc = {
+            "id": str(uuid.uuid4()),
+            "partner_id": partner_id,
+            "title": f"Service Agreement - {package_name}",
+            "description": f"${rate_per_account}/account | {min_accounts}-{max_accounts} accounts | Generated {now.strftime('%b %d, %Y')}",
+            "agreement_type": "service_agreement",
+            "file_name": pdf_filename,
+            "file_url": f"/media/agreements/{pdf_filename}",
+            "file_size": len(pdf_bytes),
+            "effective_date": now.isoformat(),
+            "expiration_date": None,
+            "status": "active",
+            "linked_agreement_id": agreement_id,
+            "uploaded_by_id": current_user.get("id"),
+            "uploaded_by_name": current_user.get("full_name", current_user.get("email")),
+            "created_at": now.isoformat()
+        }
+        await db.outsource_partner_agreements.insert_one(partner_doc)
+
+        return agreement
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[AGREEMENT GENERATION ERROR] {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/outsource/partners/{partner_id}/service-agreements", dependencies=[Depends(check_permissions("author"))])
+async def get_partner_service_agreements(partner_id: str):
+    """Get all generated service agreements for a partner."""
+    try:
+        agreements = await db.outsource_agreements.find({"partner_id": partner_id}, {"_id": 0}).sort("created_at", -1).to_list(50)
+        return agreements
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/outsource/agreements/{agreement_id}/download", dependencies=[Depends(check_permissions("author"))])
+async def download_outsource_agreement(agreement_id: str):
+    """Download the outsourcing service agreement as PDF."""
+    try:
+        agreement = await db.outsource_agreements.find_one({"id": agreement_id}, {"_id": 0})
+        if not agreement:
+            raise HTTPException(status_code=404, detail="Agreement not found")
+        
+        # Try loading persisted PDF first
+        pdf_url = agreement.get("pdf_url")
+        if pdf_url:
+            file_path = Path(pdf_url.lstrip("/"))
+            if file_path.exists():
+                filename = f"Service_Agreement_{agreement.get('company_name', 'Client').replace(' ', '_')}_{agreement_id[:8]}.pdf"
+                return StreamingResponse(
+                    open(file_path, "rb"),
+                    media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+                )
+
+        # Fallback: generate on the fly
+        pdf_buffer = _generate_agreement_pdf(agreement)
+        
+        filename = f"Service_Agreement_{agreement.get('company_name', 'Client').replace(' ', '_')}_{agreement_id[:8]}.pdf"
+        return StreamingResponse(
+            pdf_buffer,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[AGREEMENT PDF ERROR] {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.patch("/api/admin/outsource/agreements/{agreement_id}/status", dependencies=[Depends(check_permissions("author"))])
+async def update_agreement_status(agreement_id: str, status_data: dict, current_user: dict = Depends(get_current_user)):
+    """Update agreement status (draft, sent, signed, active, terminated)."""
+    try:
+        status = status_data.get("status")
+        result = await db.outsource_agreements.update_one(
+            {"id": agreement_id},
+            {"$set": {"status": status, "updated_at": datetime.now(timezone.utc).isoformat()}}
+        )
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Agreement not found")
+        return {"message": "Agreement status updated"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _generate_agreement_pdf(agreement):
+    """Generate a professional outsourcing service agreement PDF."""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.75*inch, bottomMargin=0.75*inch, leftMargin=0.85*inch, rightMargin=0.85*inch)
+    
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle('AgreementTitle', parent=styles['Title'], fontSize=16, spaceAfter=6, alignment=TA_CENTER, textColor=colors.HexColor('#1e40af'))
+    heading_style = ParagraphStyle('SectionHeading', parent=styles['Heading2'], fontSize=11, spaceBefore=14, spaceAfter=6, textColor=colors.HexColor('#1e3a5f'))
+    body_style = ParagraphStyle('Body', parent=styles['Normal'], fontSize=9, leading=13, alignment=TA_JUSTIFY, spaceAfter=4)
+    bold_style = ParagraphStyle('Bold', parent=body_style, fontName='Helvetica-Bold')
+    small_style = ParagraphStyle('Small', parent=body_style, fontSize=8, leading=11)
+    
+    rate = agreement.get("rate_per_account", 30.00)
+    min_accts = agreement.get("min_accounts", 35)
+    max_accts = agreement.get("max_accounts", 50)
+    company = agreement.get("company_name", "___________________________")
+    contact = agreement.get("contact_name", "___________________________")
+    email = agreement.get("contact_email", "___________________________")
+    
+    elements = []
+    
+    # Title
+    elements.append(Paragraph("CREDIT REPAIR OUTSOURCING SERVICE AGREEMENT", title_style))
+    elements.append(Spacer(1, 8))
+    elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#1e40af')))
+    elements.append(Spacer(1, 10))
+    
+    # Parties
+    elements.append(Paragraph(f'This Agreement is entered into as of ________________, 20___ ("Effective Date")', body_style))
+    elements.append(Spacer(1, 6))
+    elements.append(Paragraph('<b>BETWEEN:</b>', bold_style))
+    elements.append(Paragraph(f'<b>SERVICE PROVIDER:</b> {agreement.get("provider_name", "Credlocity LLC")} ("Provider")', body_style))
+    elements.append(Paragraph(f'<b>CLIENT:</b> {company}<br/>Contact: {contact}<br/>Email: {email} ("Client")', body_style))
+    elements.append(Spacer(1, 8))
+    
+    # Section 1 - Services
+    elements.append(Paragraph("1. SERVICES PROVIDED", heading_style))
+    elements.append(Paragraph("<b>1.1 Scope of Services</b>", bold_style))
+    elements.append(Paragraph("Provider agrees to perform credit repair outsourcing services as a backend operational partner for Client's consumer credit repair business. Services include:", body_style))
+    for svc in ["Preparation and mailing of credit bureau dispute letters to Experian, Equifax, and TransUnion", f"Processing of {min_accts} to {max_accts} consumer accounts per monthly service period", "Triggering of Client-specified automations within Provider's systems", "Monthly confirmation of letter dispatch activities"]:
+        elements.append(Paragraph(f"&bull; {svc}", small_style))
+    
+    elements.append(Spacer(1, 4))
+    elements.append(Paragraph("<b>1.2 Service Package</b>", bold_style))
+    elements.append(Paragraph(f"Package: {agreement.get('package_name', 'Bureau Letters Only - Variable Volume')} ({min_accts}-{max_accts} Clients)", body_style))
+    elements.append(Paragraph(f"Rate: <b>${rate:.2f}</b> per round, per consumer account, per month", body_style))
+    
+    elements.append(Spacer(1, 4))
+    elements.append(Paragraph("<b>1.3 Variable Volume Pricing</b>", bold_style))
+    elements.append(Paragraph(f"Client may prepay for services covering {min_accts} to {max_accts} consumer accounts per service period. Total monthly prepayment = Number of Consumer Accounts x ${rate:.2f}", body_style))
+    
+    # Pricing table
+    pricing_data = [
+        ["Accounts", "Rate", "Monthly Total"],
+        [str(min_accts), f"${rate:.2f}", f"${min_accts * rate:,.2f}"],
+        [str(int((min_accts + max_accts) / 2)), f"${rate:.2f}", f"${int((min_accts + max_accts) / 2) * rate:,.2f}"],
+        [str(max_accts), f"${rate:.2f}", f"${max_accts * rate:,.2f}"],
+    ]
+    table = Table(pricing_data, colWidths=[1.8*inch, 1.5*inch, 2*inch])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1e40af')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f0f4f8')]),
+    ]))
+    elements.append(Spacer(1, 4))
+    elements.append(table)
+    
+    # Section 2-4 (condensed)
+    for section, title, content in [
+        ("2", "OPERATIONAL PROCEDURES", "Provider maintains proprietary dispute letter templates. Client acknowledges: Provider will NOT provide copies of dispute letters. Proof of mailing will be provided without disclosure of letter content. Provider may conduct screen-share demonstrations at its sole discretion."),
+        ("3", "NO GUARANTEE OF RESULTS", "Provider makes NO GUARANTEES regarding credit repair outcomes. Results vary based on individual consumer circumstances. Client remains fully responsible for all representations made to consumers and compliance with applicable laws."),
+        ("4", "CONFIDENTIALITY AND NON-DISCLOSURE", "Both parties agree to maintain confidentiality of all proprietary information. Provider's dispute letter templates, strategies, and business processes are strictly confidential. Consumer personal information must be protected per FCRA, GLBA, and state privacy laws. Confidentiality obligations survive termination for five (5) years."),
+    ]:
+        elements.append(Paragraph(f"{section}. {title}", heading_style))
+        elements.append(Paragraph(content, body_style))
+    
+    # Section 5 - Billing
+    elements.append(Paragraph("5. BILLING AND PAYMENT", heading_style))
+    elements.append(Paragraph(f"All services must be prepaid before rendering. Monthly prepayment = Number of Accounts (between {min_accts} and {max_accts}) x ${rate:.2f}. All prepayments are non-refundable once services have commenced. Provider may suspend services for non-payment.", body_style))
+    
+    # Sections 6-11
+    for section, title, content in [
+        ("6", "TERM AND TERMINATION", "Month-to-month basis. Either party may terminate with 30 days written notice. Immediate termination for non-payment or material breach uncured within 15 days."),
+        ("7", "LIMITATION OF LIABILITY", f"Provider's total liability shall not exceed total amount paid by Client in the six (6) months preceding the claim. Client shall indemnify Provider from consumer claims not arising from Provider's gross negligence."),
+        ("8", "COMPLIANCE", "Both parties agree to comply with CROA, TSR, FCRA, FDCPA, and state-specific credit services organization laws."),
+    ]:
+        elements.append(Paragraph(f"{section}. {title}", heading_style))
+        elements.append(Paragraph(content, body_style))
+    
+    # Additional terms
+    if agreement.get("additional_terms"):
+        elements.append(Paragraph("ADDITIONAL TERMS", heading_style))
+        elements.append(Paragraph(agreement["additional_terms"], body_style))
+    
+    # Signatures
+    elements.append(Spacer(1, 20))
+    elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#1e40af')))
+    elements.append(Spacer(1, 10))
+    elements.append(Paragraph("SIGNATURES", heading_style))
+    
+    sig_data = [
+        ["PROVIDER", "CLIENT"],
+        ["Name: ___________________________", f"Name: {contact}"],
+        ["Company: Credlocity LLC", f"Company: {company}"],
+        ["Signature: ___________________________", "Signature: ___________________________"],
+        ["Date: ___________________________", "Date: ___________________________"],
+    ]
+    sig_table = Table(sig_data, colWidths=[3.2*inch, 3.2*inch])
+    sig_table.setStyle(TableStyle([
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+    ]))
+    elements.append(sig_table)
+    
+    # Acknowledgment checkboxes
+    elements.append(Spacer(1, 15))
+    elements.append(Paragraph("ACKNOWLEDGMENT OF TERMS", heading_style))
+    elements.append(Paragraph("By signing, Client specifically acknowledges:", bold_style))
+    acks = [
+        "Provider will NOT provide copies of dispute letters",
+        "Provider makes NO GUARANTEES about credit repair results",
+        "Client maintains confidentiality of all Provider proprietary information",
+        f"All services must be prepaid at ${rate:.2f} per account ({min_accts}-{max_accts} accounts)",
+        "Prepayments are non-refundable once services commence"
+    ]
+    for ack in acks:
+        elements.append(Paragraph(f"&#9744; {ack}", small_style))
+    
+    elements.append(Spacer(1, 12))
+    elements.append(Paragraph("___________________________, Authorized Signatory &nbsp;&nbsp;&nbsp;&nbsp; Date: ___________________________", body_style))
+    
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
+
 
 # Seed default data on startup
 @app.on_event("startup")
@@ -8580,6 +8914,10 @@ async def startup_seed():
     try:
         await seed_case_update_status_options()
         await seed_credit_repair_companies()
+        await seed_default_groups()
+        await seed_partner_users()
+        await seed_documentation()
+        await seed_cms_mastery_training()
     except Exception as e:
         print(f"Warning: Startup seed failed (non-fatal): {e}")
 

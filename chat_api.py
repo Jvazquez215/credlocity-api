@@ -403,6 +403,7 @@ async def send_message(
     
     content = data.get("content", "").strip()
     attachments = data.get("attachments", [])
+    attached_records = data.get("attached_records", [])
     reply_to = data.get("reply_to")
     
     if not content and not attachments:
@@ -414,6 +415,7 @@ async def send_message(
         "sender_id": user["id"],
         "content": content,
         "attachments": attachments,
+        "attached_records": attached_records,
         "reply_to": reply_to,
         "read_by": [user["id"]],
         "reactions": [],
@@ -560,7 +562,7 @@ async def add_reaction(
 
 # ==================== FILE UPLOAD ====================
 
-UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "./uploads/chat"))
+UPLOAD_DIR = Path(os.environ.get("UPLOAD_BASE", ".")) / "uploads" / "chat"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 @chat_router.post("/upload")
@@ -723,6 +725,61 @@ async def get_online_users(user: dict = Depends(get_current_user_from_token)):
             online_users.append(user)
     
     return {"online_users": online_users, "count": len(online_users)}
+
+
+# ==================== RECORD SEARCH (for attaching records to messages) ====================
+
+@chat_router.get("/search-records")
+async def search_records(
+    type: str = "client",
+    q: str = "",
+    user: dict = Depends(get_current_user_from_token)
+):
+    """Search across CRM records to attach to chat messages"""
+    if len(q) < 2:
+        return {"records": []}
+
+    regex = {"$regex": q, "$options": "i"}
+
+    collection_map = {
+        "client": "clients",
+        "lead": "leads",
+        "case": "cases",
+        "company": "companies",
+    }
+
+    col_name = collection_map.get(type)
+    if not col_name:
+        return {"records": []}
+
+    collection = db[col_name]
+
+    # Build search query per type
+    if type == "client":
+        query = {"$or": [{"full_name": regex}, {"email": regex}, {"phone": regex}]}
+        proj = {"_id": 0, "id": 1, "full_name": 1, "email": 1, "phone": 1}
+    elif type == "lead":
+        query = {"$or": [{"name": regex}, {"email": regex}, {"phone": regex}]}
+        proj = {"_id": 0, "id": 1, "name": 1, "email": 1, "phone": 1}
+    elif type == "case":
+        query = {"$or": [{"title": regex}, {"case_number": regex}, {"description": regex}]}
+        proj = {"_id": 0, "id": 1, "title": 1, "case_number": 1, "status": 1}
+    elif type == "company":
+        query = {"$or": [{"name": regex}, {"email": regex}]}
+        proj = {"_id": 0, "id": 1, "name": 1, "email": 1}
+    else:
+        return {"records": []}
+
+    results = await collection.find(query, proj).limit(15).to_list(length=15)
+
+    # Normalize results to have a consistent 'name' field
+    for r in results:
+        if "full_name" in r and "name" not in r:
+            r["name"] = r["full_name"]
+        if "title" in r and "name" not in r:
+            r["name"] = r["title"]
+
+    return {"records": results}
 
 
 # ==================== TYPING INDICATOR ====================

@@ -211,13 +211,23 @@ async def create_team_member(data: dict, authorization: Optional[str] = Header(N
         "phone": data.get("phone"),
         "role": role,
         "role_name": DEFAULT_PERMISSION_TEMPLATES.get(role, {}).get("name", role),
-        "member_type": data.get("member_type", "employee"),  # employee, contractor, affiliate, attorney
+        "member_type": data.get("member_type", "employee"),
         "department": data.get("department", "collections"),
+        "title": data.get("title", ""),
+        "location": data.get("location", ""),
+        "bio": data.get("bio", ""),
+        "linkedin_url": data.get("linkedin_url", ""),
+        "photo_url": data.get("photo_url", ""),
+        "skills": data.get("skills", []),
+        "hire_date": data.get("hire_date"),
+        "birthday": data.get("birthday"),
+        "emergency_contact_name": data.get("emergency_contact_name", ""),
+        "emergency_contact_phone": data.get("emergency_contact_phone", ""),
+        "emergency_contact_relation": data.get("emergency_contact_relation", ""),
         "team_id": data.get("team_id"),
         "reports_to": data.get("reports_to"),
         "permissions": data.get("permissions") or DEFAULT_PERMISSION_TEMPLATES.get(role, {}).get("permissions", {}),
         "status": "active",
-        "hire_date": data.get("hire_date"),
         "hourly_rate": data.get("hourly_rate"),
         "commission_rate": data.get("commission_rate"),
         "notes": data.get("notes"),
@@ -309,7 +319,9 @@ async def update_team_member(member_id: str, data: dict, authorization: Optional
     # Fields that can be updated
     update_fields = ["full_name", "phone", "role", "member_type", "department", 
                     "team_id", "reports_to", "permissions", "status", "hourly_rate",
-                    "commission_rate", "notes"]
+                    "commission_rate", "notes", "title", "location", "hire_date",
+                    "birthday", "emergency_contact_name", "emergency_contact_phone",
+                    "emergency_contact_relation", "skills", "bio", "linkedin_url", "photo_url"]
     
     update_data = {"updated_at": datetime.now(timezone.utc).isoformat()}
     for field in update_fields:
@@ -345,6 +357,66 @@ async def delete_team_member(member_id: str, authorization: Optional[str] = Head
     
     await db.team_members.delete_one({"id": member_id})
     return {"message": "Team member deleted", "id": member_id}
+
+
+@team_router.get("/members/{member_id}/training-progress")
+async def get_member_training_progress(member_id: str, authorization: Optional[str] = Header(None)):
+    """Get training progress for a specific team member."""
+    user = await get_current_user(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    member = await db.team_members.find_one({"id": member_id}, {"_id": 0, "id": 1, "email": 1})
+    if not member:
+        raise HTTPException(status_code=404, detail="Team member not found")
+
+    # Find user account linked to this team member
+    user_account = await db.users.find_one({"email": member["email"]}, {"_id": 0, "id": 1})
+    user_id = user_account["id"] if user_account else member["id"]
+
+    # Get all published modules
+    modules = await db.training_modules.find({"status": "published"}, {"_id": 0}).to_list(100)
+
+    # Get progress records
+    progress_records = await db.training_progress.find({"user_id": user_id}, {"_id": 0}).to_list(100)
+    progress_map = {p["module_id"]: p for p in progress_records}
+
+    # Get quiz results
+    quiz_results = await db.training_quiz_results.find({"user_id": user_id}, {"_id": 0}).to_list(100)
+    quiz_map = {}
+    for qr in quiz_results:
+        mid = qr.get("module_id")
+        if mid not in quiz_map or qr.get("score", 0) > quiz_map[mid].get("score", 0):
+            quiz_map[mid] = qr
+
+    result = []
+    for mod in modules:
+        prog = progress_map.get(mod["id"], {})
+        quiz = quiz_map.get(mod["id"])
+        total_steps = len(mod.get("steps", []))
+        completed_steps = len(prog.get("completed_steps", []))
+        result.append({
+            "module_id": mod["id"],
+            "module_title": mod.get("title", ""),
+            "department": mod.get("department", ""),
+            "total_steps": total_steps,
+            "completed_steps": completed_steps,
+            "progress_pct": round((completed_steps / total_steps * 100) if total_steps > 0 else 0),
+            "quiz_score": quiz.get("score") if quiz else None,
+            "quiz_passed": quiz.get("passed") if quiz else None,
+            "completed_at": prog.get("completed_at"),
+        })
+
+    total_modules = len(modules)
+    completed_modules = sum(1 for r in result if r["progress_pct"] == 100)
+
+    return {
+        "total_modules": total_modules,
+        "completed_modules": completed_modules,
+        "overall_pct": round((completed_modules / total_modules * 100) if total_modules > 0 else 0),
+        "modules": result
+    }
+
 
 
 # ==================== PERMISSION TEMPLATES ====================

@@ -10,7 +10,7 @@ import sys
 from typing import Optional, Dict, Any
 
 # Base URL for the API
-BASE_URL = "https://credlocity-forms.preview.emergentagent.com/api"
+BASE_URL = "https://condescending-wozniak-3.preview.emergentagent.com/api"
 
 # Test credentials
 ADMIN_EMAIL = "Admin@credlocity.com"

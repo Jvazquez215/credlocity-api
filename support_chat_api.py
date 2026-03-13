@@ -109,21 +109,117 @@ def require_admin(user):
         raise HTTPException(status_code=403, detail="Admin access required")
 
 
+# ==================== PUBLIC WIDGET SETTINGS (No Auth) ====================
+
+@support_chat_router.get("/widget/settings")
+async def get_widget_settings():
+    """Public endpoint: get widget appearance and excluded pages for the chat bubble"""
+    settings = await db.chatbot_settings.find_one({"id": "main"}, {"_id": 0})
+
+    excluded = await db.widget_page_settings.find({}, {"_id": 0}).to_list(length=500)
+    excluded_pages = [e["page_path"] for e in excluded]
+
+    if not settings:
+        return {
+            "widget_enabled": True,
+            "greeting_message": "Hi! How can we help you today?",
+            "widget_appearance": {
+                "primary_color": "#10B981",
+                "position": "bottom-right",
+                "title": "Credlocity Support",
+                "subtitle": "We typically reply within minutes"
+            },
+            "excluded_pages": excluded_pages
+        }
+
+    return {
+        "widget_enabled": settings.get("enabled", True),
+        "greeting_message": settings.get("greeting_message", "Hi! How can we help you today?"),
+        "widget_appearance": settings.get("widget_appearance", {}),
+        "excluded_pages": excluded_pages
+    }
+
+
+@support_chat_router.get("/widget/excluded-pages")
+async def get_excluded_pages(user: dict = Depends(get_current_user)):
+    """Admin: get list of page paths where the chat widget is hidden"""
+    require_admin(user)
+    pages = await db.widget_page_settings.find({}, {"_id": 0}).to_list(length=500)
+    return {"pages": pages}
+
+
+@support_chat_router.post("/widget/excluded-pages")
+async def add_excluded_page(data: dict, user: dict = Depends(get_current_user)):
+    """Admin: hide the chat widget on a specific page path"""
+    require_admin(user)
+    page_path = data.get("page_path", "").strip()
+    if not page_path:
+        raise HTTPException(status_code=400, detail="page_path is required")
+
+    existing = await db.widget_page_settings.find_one({"page_path": page_path})
+    if existing:
+        raise HTTPException(status_code=409, detail="Page path already excluded")
+
+    entry = {
+        "id": str(uuid4()),
+        "page_path": page_path,
+        "created_by": user["id"],
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.widget_page_settings.insert_one(entry)
+    entry.pop("_id", None)
+    return entry
+
+
+@support_chat_router.delete("/widget/excluded-pages/{page_id}")
+async def remove_excluded_page(page_id: str, user: dict = Depends(get_current_user)):
+    """Admin: re-enable the chat widget on a previously excluded page"""
+    require_admin(user)
+    result = await db.widget_page_settings.delete_one({"id": page_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Page setting not found")
+    return {"message": "Page exclusion removed"}
+
+
 # ==================== CHAT SESSIONS (Visitor Side) ====================
 
 @support_chat_router.post("/sessions/start")
 async def start_chat_session(data: dict):
-    """Start a new support chat session (called by website visitor)"""
+    """Start a new support chat session (called by website visitor). Optionally creates a lead."""
     visitor_name = data.get("name", "Visitor")
     visitor_email = data.get("email", "")
+    visitor_phone = data.get("phone", "")
     page_url = data.get("page_url", "")
-    
+
+    # Create a lead record if requested
+    lead_id = None
+    if data.get("create_lead") and visitor_email:
+        existing_lead = await db.leads.find_one({"email": visitor_email}, {"_id": 0, "id": 1})
+        if existing_lead:
+            lead_id = existing_lead["id"]
+        else:
+            lead = {
+                "id": str(uuid4()),
+                "name": visitor_name,
+                "email": visitor_email,
+                "phone": visitor_phone,
+                "source": "chat_widget",
+                "page_url": page_url,
+                "status": "new",
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+            await db.leads.insert_one(lead)
+            lead.pop("_id", None)
+            lead_id = lead["id"]
+
     session = {
         "id": str(uuid4()),
         "visitor_name": visitor_name,
         "visitor_email": visitor_email,
+        "visitor_phone": visitor_phone,
         "page_url": page_url,
-        "status": "waiting",  # waiting, active, resolved, abandoned
+        "lead_id": lead_id,
+        "status": "waiting",
         "assigned_agent_id": None,
         "assigned_agent_name": None,
         "department": data.get("department", "general"),
@@ -136,16 +232,16 @@ async def start_chat_session(data: dict):
         "tags": [],
         "notes": ""
     }
-    
+
     await db.support_chat_sessions.insert_one(session)
     session.pop("_id", None)
-    
+
     # Notify all agents about new chat
     await support_manager.broadcast_to_agents({
         "type": "new_session",
         "session": session
     })
-    
+
     return session
 
 

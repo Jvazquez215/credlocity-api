@@ -79,18 +79,7 @@ class PageUpdate(BaseModel):
     placement: Optional[str] = None
     seo: Optional[SEOMetadata] = None
 
-# Author Models
-class Author(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    name: str
-    slug: str
-    title: str
-    bio: str
-    photo: Optional[str] = None
-    email: Optional[EmailStr] = None
-    credentials: Optional[str] = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+# Author Models (see comprehensive Author class below at line ~617)
 
 class AuthorCreate(BaseModel):
     name: str

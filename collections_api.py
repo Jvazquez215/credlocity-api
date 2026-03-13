@@ -1020,9 +1020,192 @@ async def create_payment_plan(account_id: str, data: dict, token: Optional[str] 
     }
     await db.collections_notes.insert_one(note)
     
+    # ===== AUTO-COMMISSION BRIDGE =====
+    # 1) Collection fee: rep gets immediately whatever they collected
+    collection_fee_collected = data.get("collection_fee_adjusted", 0)
+    if collection_fee_collected > 0:
+        cfe = {
+            "id": str(uuid4()),
+            "employee_id": user["id"],
+            "employee_name": user.get("full_name", ""),
+            "account_id": account_id,
+            "account_name": account.get("client_name", ""),
+            "amount_collected": collection_fee_collected,
+            "commission_rate": 100,
+            "commission_amount": round(collection_fee_collected, 2),
+            "description": f"Collection Fee - {account.get('client_name', '')} (Agreement {agreement['id'][:8]})",
+            "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "status": "pending",
+            "commission_type": "collection_fee",
+            "agreement_id": agreement["id"],
+            "created_by": user["id"],
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        await db.payroll_commissions.insert_one(cfe)
+
+    # 2) Track commission with 70% threshold
+    # The 20% commission base = past due + late fees collected (EXCLUDING collection fee)
+    commission_base = (
+        data.get("credit_reports_charge", 0)
+        + data.get("services_rendered_charge", 0)
+        + data.get("late_fees_adjusted", 0)
+        + data.get("file_processing_fee_adjusted", 0)
+        + data.get("payment_processing_fee_adjusted", 0)
+    )
+    threshold_amount = round(adjusted_balance * 0.70, 2)
+    commission_20_amount = round(commission_base * 0.20, 2)
+
+    tracker = {
+        "id": str(uuid4()),
+        "agreement_id": agreement["id"],
+        "account_id": account_id,
+        "client_name": account.get("client_name", ""),
+        "rep_id": user["id"],
+        "rep_name": user.get("full_name", ""),
+        "tier": tier,
+        "total_owed": adjusted_balance,
+        "threshold_percent": 70,
+        "threshold_amount": threshold_amount,
+        "total_collected": 0,
+        "commission_base": commission_base,
+        "commission_rate": 20,
+        "commission_amount": commission_20_amount,
+        "collection_fee_collected": collection_fee_collected,
+        "threshold_met": False,
+        "commission_paid": False,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.commission_trackers.insert_one(tracker)
+
+    # For PIF (Tier 1 / payment_type=full / single payment), check threshold immediately
+    is_full_payment = data.get("payment_type") == "full" or data.get("number_of_payments", 1) == 0
+    if is_full_payment:
+        paid = data.get("down_payment_amount", 0)
+        await _check_commission_threshold(agreement["id"], paid)
+
     agreement.pop("_id", None)
     agreement["schedule"] = schedule
     return agreement
+
+
+async def _check_commission_threshold(agreement_id: str, new_payment: float = 0):
+    """Check if 70% threshold is met and auto-create payroll commission if so."""
+    tracker = await db.commission_trackers.find_one({"agreement_id": agreement_id})
+    if not tracker or tracker.get("commission_paid"):
+        return
+
+    new_total = tracker.get("total_collected", 0) + new_payment
+    await db.commission_trackers.update_one(
+        {"agreement_id": agreement_id},
+        {"$set": {"total_collected": round(new_total, 2), "updated_at": datetime.now(timezone.utc).isoformat()}}
+    )
+
+    if new_total >= tracker["threshold_amount"] and not tracker.get("commission_paid"):
+        # Threshold met! Create the 20% commission entry in payroll
+        entry = {
+            "id": str(uuid4()),
+            "employee_id": tracker["rep_id"],
+            "employee_name": tracker["rep_name"],
+            "account_id": tracker["account_id"],
+            "account_name": tracker.get("client_name", ""),
+            "amount_collected": new_total,
+            "commission_rate": tracker["commission_rate"],
+            "commission_amount": tracker["commission_amount"],
+            "description": f"20% Commission - {tracker.get('client_name', '')} (70% threshold met: ${new_total:,.2f}/${tracker['total_owed']:,.2f})",
+            "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "status": "pending",
+            "commission_type": "collections_commission",
+            "agreement_id": agreement_id,
+            "created_by": tracker["rep_id"],
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        await db.payroll_commissions.insert_one(entry)
+
+        await db.commission_trackers.update_one(
+            {"agreement_id": agreement_id},
+            {"$set": {"threshold_met": True, "commission_paid": True, "threshold_met_at": datetime.now(timezone.utc).isoformat(), "updated_at": datetime.now(timezone.utc).isoformat()}}
+        )
+
+
+@collections_router.post("/agreements/{agreement_id}/record-payment")
+async def record_payment(agreement_id: str, data: dict, token: Optional[str] = None, authorization: Optional[str] = Header(None)):
+    """Record a payment against an agreement and check 70% commission threshold."""
+    user = await get_collections_user(token, authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    agreement = await db.payment_agreements.find_one({"id": agreement_id}, {"_id": 0})
+    if not agreement:
+        raise HTTPException(status_code=404, detail="Agreement not found")
+
+    amount = data.get("amount", 0)
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be positive")
+
+    payment_id = data.get("schedule_payment_id")
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Update the scheduled payment if specified
+    if payment_id:
+        await db.payment_schedule.update_one(
+            {"id": payment_id},
+            {"$set": {"status": "paid", "paid_amount": amount, "paid_at": now}}
+        )
+
+    # Record payment in ledger
+    payment = {
+        "id": str(uuid4()),
+        "agreement_id": agreement_id,
+        "account_id": agreement["account_id"],
+        "amount": amount,
+        "payment_method": data.get("payment_method", "card"),
+        "reference": data.get("reference", ""),
+        "recorded_by_id": user["id"],
+        "recorded_by_name": user.get("full_name", ""),
+        "created_at": now
+    }
+    await db.agreement_payments.insert_one(payment)
+
+    # Check 70% commission threshold
+    await _check_commission_threshold(agreement_id, amount)
+
+    # Check if agreement fully paid
+    tracker = await db.commission_trackers.find_one({"agreement_id": agreement_id}, {"_id": 0})
+    total_collected = tracker.get("total_collected", 0) if tracker else amount
+    total_owed = agreement.get("adjusted_balance", 0)
+
+    if total_collected >= total_owed:
+        await db.payment_agreements.update_one({"id": agreement_id}, {"$set": {"status": "completed", "completed_at": now}})
+        await db.collections_accounts.update_one(
+            {"id": agreement["account_id"]},
+            {"$set": {"account_status": "paid_in_full", "updated_at": now}}
+        )
+
+    payment.pop("_id", None)
+    return {
+        "payment": payment,
+        "total_collected": total_collected,
+        "total_owed": total_owed,
+        "percent_collected": round(total_collected / total_owed * 100, 2) if total_owed > 0 else 0,
+        "threshold_met": tracker.get("threshold_met", False) if tracker else False
+    }
+
+
+@collections_router.get("/commission-trackers")
+async def list_commission_trackers(token: Optional[str] = None, authorization: Optional[str] = Header(None), rep_id: Optional[str] = None):
+    """List commission trackers (shows progress toward 70% threshold)."""
+    user = await get_collections_user(token, authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    query = {}
+    if user["role"] == "collections_agent":
+        query["rep_id"] = user["id"]
+    elif rep_id:
+        query["rep_id"] = rep_id
+    trackers = await db.commission_trackers.find(query, {"_id": 0}).sort("created_at", -1).to_list(length=200)
+    return {"trackers": trackers}
+
 
 @collections_router.get("/accounts/{account_id}/payment-plans")
 async def get_payment_plans(account_id: str, token: Optional[str] = None, authorization: Optional[str] = Header(None)):
@@ -3067,3 +3250,86 @@ async def get_rep_performance(
         }
     }
 
+
+
+# ==================== COMMISSION DASHBOARD ====================
+
+@collections_router.get("/commission-dashboard")
+async def commission_dashboard(token: Optional[str] = None, authorization: Optional[str] = Header(None), rep_id: Optional[str] = None):
+    """Commission dashboard with summary, active trackers, history, and leaderboard."""
+    user = await get_collections_user(token, authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    is_admin = user.get("role") in ["admin", "super_admin", "director", "manager"]
+
+    # Determine which rep to show data for
+    target_rep_id = rep_id if (is_admin and rep_id) else (None if is_admin else user["id"])
+
+    # --- Active Trackers ---
+    tracker_query = {}
+    if target_rep_id:
+        tracker_query["rep_id"] = target_rep_id
+    trackers = await db.commission_trackers.find(tracker_query, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+    # --- Commission entries (from payroll_commissions) ---
+    comm_query = {}
+    if target_rep_id:
+        comm_query["employee_id"] = target_rep_id
+    commissions = await db.payroll_commissions.find(comm_query, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+    # Summary calculations
+    total_earned = sum(c.get("commission_amount", 0) for c in commissions if c.get("status") in ["pending", "paid", "approved"])
+    total_paid = sum(c.get("commission_amount", 0) for c in commissions if c.get("status") == "paid")
+    total_pending = sum(c.get("commission_amount", 0) for c in commissions if c.get("status") == "pending")
+    collection_fee_earned = sum(c.get("commission_amount", 0) for c in commissions if c.get("commission_type") == "collection_fee")
+    base_commission_earned = sum(c.get("commission_amount", 0) for c in commissions if c.get("commission_type") == "collections_commission")
+
+    # Projected = sum of all commission_amount from trackers where commission hasn't been paid yet
+    projected_additional = sum(t.get("commission_amount", 0) for t in trackers if not t.get("commission_paid"))
+
+    # --- Leaderboard (admin only) ---
+    leaderboard = []
+    if is_admin:
+        pipeline = [
+            {"$group": {
+                "_id": "$employee_id",
+                "rep_name": {"$first": "$employee_name"},
+                "total_commission": {"$sum": "$commission_amount"},
+                "count": {"$sum": 1},
+                "collection_fees": {"$sum": {"$cond": [{"$eq": ["$commission_type", "collection_fee"]}, "$commission_amount", 0]}},
+                "base_commissions": {"$sum": {"$cond": [{"$eq": ["$commission_type", "collections_commission"]}, "$commission_amount", 0]}}
+            }},
+            {"$sort": {"total_commission": -1}},
+            {"$limit": 20}
+        ]
+        leaderboard_raw = await db.payroll_commissions.aggregate(pipeline).to_list(None)
+        leaderboard = [
+            {
+                "rep_id": l["_id"],
+                "rep_name": l["rep_name"],
+                "total_commission": round(l["total_commission"], 2),
+                "count": l["count"],
+                "collection_fees": round(l["collection_fees"], 2),
+                "base_commissions": round(l["base_commissions"], 2)
+            }
+            for l in leaderboard_raw
+        ]
+
+    return {
+        "summary": {
+            "total_earned": round(total_earned, 2),
+            "total_paid": round(total_paid, 2),
+            "total_pending": round(total_pending, 2),
+            "collection_fee_earned": round(collection_fee_earned, 2),
+            "base_commission_earned": round(base_commission_earned, 2),
+            "projected_additional": round(projected_additional, 2),
+            "total_projected": round(total_earned + projected_additional, 2),
+            "active_trackers": len([t for t in trackers if not t.get("commission_paid")]),
+            "completed_trackers": len([t for t in trackers if t.get("commission_paid")])
+        },
+        "trackers": trackers,
+        "commissions": commissions[:50],
+        "leaderboard": leaderboard,
+        "is_admin": is_admin
+    }
