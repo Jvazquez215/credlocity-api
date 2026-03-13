@@ -8939,11 +8939,15 @@ async def startup_seed():
 
     # Auto-seed content data (FAQs, reviews, etc.) if collections are empty
     try:
-        from seed_content import seed_content
+        from seed_content import seed_content, seed_demo_accounts
         print("=== Auto-seeding content data ===")
         await seed_content(db)
+        print("=== Seeding demo accounts ===")
+        await seed_demo_accounts(db)
         print("=== Content seed complete ===")
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         print(f"Warning: Content seed failed (non-fatal): {e}")
 
 
