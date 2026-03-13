@@ -5,10 +5,10 @@ services:
     region: oregon
     plan: free
     buildCommand: chmod +x build.sh && ./build.sh
-    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    startCommand: OPENSSL_CONF=/opt/render/project/src/openssl.cnf uvicorn server:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: MONGO_URL
-        value: mongodb+srv://credlocity:Credlocity2024!@cluster0.g3sod65.mongodb.net/?retryWrites=true&w=majority&appName=Credlocity
+        value: mongodb+srv://credlocity:Credlocity2024!@cluster0.g3sod65.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0
       - key: DB_NAME
         value: credlocity
       - key: SECRET_KEY
@@ -21,3 +21,5 @@ services:
         value: sk-placeholder
       - key: PYTHON_VERSION
         value: 3.10.13
+      - key: OPENSSL_CONF
+        value: /opt/render/project/src/openssl.cnf
