@@ -6,7 +6,7 @@ services:
     plan: free
     envVars:
       - key: MONGO_URL
-        value: mongodb+srv://claw-setup-4bx5n:d6pevp4lqs2c73eepqh0@customer-apps.vur8w0.mongodb.net/?retryWrites=true&w=majority
+        value: mongodb://127.0.0.1:27017
       - key: DB_NAME
         value: credlocity
       - key: SECRET_KEY
