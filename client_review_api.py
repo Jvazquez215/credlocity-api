@@ -17,11 +17,10 @@ import base64
 
 # Import database from server
 from motor.motor_asyncio import AsyncIOMotorClient
-from db_client import get_client
 
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "test_database")
-client = get_client(MONGO_URL)
+client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
 
 client_review_router = APIRouter(prefix="/api/client-reviews", tags=["Client Reviews"])
@@ -176,7 +175,7 @@ async def generate_review_link(
     await db.review_links.insert_one(link_record)
     
     # Generate the full link URL
-    frontend_url = os.environ.get("FRONTEND_URL", "https://condescending-wozniak-3.preview.emergentagent.com")
+    frontend_url = os.environ.get("FRONTEND_URL", "https://agreement-platform-1.preview.emergentagent.com")
     link_url = f"{frontend_url}/review/{token}"
     
     return {
@@ -238,7 +237,7 @@ async def generate_follow_up_link(
     await db.review_links.insert_one(link_record)
     
     # Generate the full link URL
-    frontend_url = os.environ.get("FRONTEND_URL", "https://condescending-wozniak-3.preview.emergentagent.com")
+    frontend_url = os.environ.get("FRONTEND_URL", "https://agreement-platform-1.preview.emergentagent.com")
     link_url = f"{frontend_url}/review/{token}"
     
     return {
@@ -591,7 +590,7 @@ async def upload_review_video(
     filename = f"review_video_{review_id}_{int(datetime.now().timestamp())}.{ext}"
     
     # Save to uploads directory
-    upload_dir = os.path.join(os.environ.get("UPLOAD_BASE", "."), "uploads", "review_videos")
+    upload_dir = "/app/uploads/review_videos"
     os.makedirs(upload_dir, exist_ok=True)
     file_path = os.path.join(upload_dir, filename)
     
