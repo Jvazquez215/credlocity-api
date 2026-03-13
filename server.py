@@ -8597,6 +8597,22 @@ async def seed_partner_users():
     admin = await db.users.find_one({"email": "Admin@credlocity.com"})
     if admin:
         await db.users.update_one({"email": "Admin@credlocity.com"}, {"$set": {"is_master": True, "is_partner": True}})
+    else:
+        admin_user = {
+            "id": str(uuid.uuid4()),
+            "email": "Admin@credlocity.com",
+            "hashed_password": get_password_hash("Credit123!"),
+            "full_name": "Master Administrator",
+            "role": "super_admin",
+            "is_active": True,
+            "is_master": True,
+            "is_partner": True,
+            "department": "Executive",
+            "status": "active",
+            "created_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(timezone.utc)
+        }
+        await db.users.insert_one(admin_user)
     
     # Seed Shar@credlocity.com as partner
     shar = await db.users.find_one({"email": "Shar@credlocity.com"})
